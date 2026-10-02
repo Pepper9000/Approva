@@ -1,0 +1,1 @@
+"""Approva Streamlit application."""
