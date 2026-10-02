@@ -1,0 +1,23 @@
+software_license:
+  tiers:
+    - {max_annual_inr: 500000, roles: [manager]}
+    - {max_annual_inr: 2500000, roles: [manager, finance]}
+    - {max_annual_inr: null, roles: [manager, finance, legal]}
+  vendor_unreviewed_or_new_add: [security]
+  new_vendor_over_inr: {threshold: 1000000, add: [legal]}
+  data_rules:
+    pii: [security, legal]
+    customer_data: [security, legal]
+    financial: [security, legal]
+    health: [security, legal]
+    source_code: [security]
+expense_claim:
+  receipt_required_over_inr: 500
+  filing_window_days: 30
+  allowed_categories: [travel, accommodation, meals, local_conveyance, training, office_supplies]
+  tiers:
+    - {max_inr: 2000, roles: []}
+    - {max_inr: 25000, roles: [manager]}
+    - {max_inr: 100000, roles: [manager, finance]}
+    - {max_inr: null, roles: [manager, finance]}
+  unknown_payee_over_inr: {threshold: 100000, add: [finance]}
