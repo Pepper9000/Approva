@@ -1,4 +1,5 @@
 # Software Procurement Policy
+
 - SW-1.1 All software purchases must be raised through Approva and must state a business justification.
 - SW-1.2 Software from an Approved Vendor with an annualised cost up to INR 5,00,000 requires approval from the requester's reporting manager only.
 - SW-1.3 Software with an annualised cost above INR 5,00,000 and up to INR 25,00,000 requires approval from the Manager and Finance.

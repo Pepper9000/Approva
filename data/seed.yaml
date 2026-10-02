@@ -1,21 +1,77 @@
 employees:
-  - {id: E001, name: Asha Verma, email: asha@example.test, role: employee, manager_id: E002, department: Design}
-  - {id: E002, name: Rohan Mehta, email: rohan@example.test, role: manager, manager_id: null, department: Design}
-  - {id: E003, name: Meera Iyer, email: meera@example.test, role: security, manager_id: null, department: Security}
-  - {id: E004, name: Farhan Qureshi, email: farhan@example.test, role: finance, manager_id: null, department: Finance}
-  - {id: E005, name: Neha Kulkarni, email: neha@example.test, role: legal, manager_id: null, department: Legal}
-  - {id: E006, name: Karan Shah, email: karan@example.test, role: employee, manager_id: E007, department: Engineering}
-  - {id: E007, name: Priya Nair, email: priya@example.test, role: manager, manager_id: null, department: Engineering}
-  - {id: E008, name: Audit Reader, email: audit@example.test, role: auditor, manager_id: null, department: Compliance}
+  - {
+      id: E001,
+      name: Asha Verma,
+      email: asha@example.test,
+      role: employee,
+      manager_id: E002,
+      department: Design,
+    }
+  - {
+      id: E002,
+      name: Rohan Mehta,
+      email: rohan@example.test,
+      role: manager,
+      manager_id: null,
+      department: Design,
+    }
+  - {
+      id: E003,
+      name: Meera Iyer,
+      email: meera@example.test,
+      role: security,
+      manager_id: null,
+      department: Security,
+    }
+  - {
+      id: E004,
+      name: Farhan Qureshi,
+      email: farhan@example.test,
+      role: finance,
+      manager_id: null,
+      department: Finance,
+    }
+  - {
+      id: E005,
+      name: Neha Kulkarni,
+      email: neha@example.test,
+      role: legal,
+      manager_id: null,
+      department: Legal,
+    }
+  - {
+      id: E006,
+      name: Karan Shah,
+      email: karan@example.test,
+      role: employee,
+      manager_id: E007,
+      department: Engineering,
+    }
+  - {
+      id: E007,
+      name: Priya Nair,
+      email: priya@example.test,
+      role: manager,
+      manager_id: null,
+      department: Engineering,
+    }
+  - {
+      id: E008,
+      name: Audit Reader,
+      email: audit@example.test,
+      role: auditor,
+      manager_id: null,
+      department: Compliance,
+    }
 vendors:
-  - {name: Figma, status: approved, last_review: null}
-  - {name: Slack, status: approved, last_review: null}
-  - {name: Notion, status: approved, last_review: null}
-  - {name: GitHub, status: approved, last_review: null}
-  - {name: Zoom, status: approved, last_review: null}
-  - {name: Atlassian, status: approved, last_review: null}
-  - {name: Microsoft, status: approved, last_review: null}
-  - {name: Google Workspace, status: approved, last_review: null}
-  - {name: Canva, status: approved, last_review: null}
-  - {name: Loom, status: unreviewed, last_review: null}
-  - {name: ShadyShare, status: blocked, last_review: null}
+  - { name: Figma, status: approved, last_review: null }
+  - { name: Slack, status: approved, last_review: null }
+  - { name: Notion, status: approved, last_review: null }
+  - { name: GitHub, status: approved, last_review: null }
+  - { name: Zoom, status: approved, last_review: null }
+  - { name: Atlassian, status: approved, last_review: null }
+  - { name: Microsoft, status: approved, last_review: null }
+  - { name: Google Workspace, status: approved, last_review: null }
+  - { name: Canva, status: approved, last_review: null }
+  - { name: Loom, status: unreviewed, last_review: null }
+  - { name: ShadyShare, status: blocked, last_review: null }

@@ -1,4 +1,5 @@
 # Expense Reimbursement Policy
+
 - EX-1.1 Reimbursable categories are travel, accommodation, meals while travelling, local conveyance, training and conferences, and office supplies.
 - EX-1.2 A receipt is mandatory for any claim above INR 500.
 - EX-1.3 Claims must be filed within 30 days of the expense date.

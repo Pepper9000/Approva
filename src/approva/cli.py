@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
-from approva import db
+from approva import audit, db
 from rich.console import Console
 
 
@@ -26,6 +27,12 @@ def main() -> int:
     approve_parser.add_argument("--as", dest="acting_as", default="E002")
     approve_parser.add_argument("--reject", action="store_true")
     approve_parser.add_argument("--comment", default=None)
+    status_parser = commands.add_parser("status", help="show the current request decision and state")
+    status_parser.add_argument("request_id")
+    commands.add_parser("audit-verify", help="verify the audit hash chain")
+    tamper_parser = commands.add_parser("tamper", help="alter one audit event for the integrity demo")
+    tamper_parser.add_argument("seq", type=int)
+    commands.add_parser("reset", help="reset transactional demo data")
     args = parser.parse_args()
     if args.command == "seed":
         db.seed_from_yaml()
@@ -52,7 +59,7 @@ def main() -> int:
         actor = _employee(args.acting_as)
         visible = []
         for row in rows:
-            decision = __import__("json").loads(row["decision_json"] or "{}")
+            decision = json.loads(row["decision_json"] or "{}")
             required = decision.get("required_roles", [])
             actor_role = "manager" if row["manager_id"] == args.acting_as and actor.get("role") == "manager" else actor.get("role")
             if actor_role in required:
@@ -60,7 +67,6 @@ def main() -> int:
         console = Console(markup=False)
         console.print("Approval inbox: " + (", ".join(visible) if visible else "empty"))
     elif args.command == "approve":
-        import json
         from approva.approvals import submit
 
         request = db.get_request(args.request_id)
@@ -77,6 +83,26 @@ def main() -> int:
         console = Console(markup=False)
         for event in submit(args.request_id, args.acting_as, role, verdict, args.comment):
             console.print(f"[{event.agent}] {event.status}: {event.summary}")
+    elif args.command == "status":
+        request = db.get_request(args.request_id)
+        if request is None:
+            raise SystemExit(f"Request not found: {args.request_id}")
+        decision = json.loads(request.get("decision_json") or "{}")
+        Console(markup=False).print(
+            f"{request['id']}: {request['status']} | {decision.get('type', 'pending')} | "
+            f"roles={', '.join(decision.get('required_roles', [])) or 'none'}"
+        )
+    elif args.command == "audit-verify":
+        ok, bad_seq = audit.verify_chain()
+        Console(markup=False).print("Audit chain OK" if ok else f"Audit chain broken at seq {bad_seq}")
+        return 0 if ok else 1
+    elif args.command == "tamper":
+        if not audit.tamper(args.seq):
+            raise SystemExit(f"No audit event at seq {args.seq}")
+        Console(markup=False).print(f"Tampered with audit event {args.seq}")
+    elif args.command == "reset":
+        db.reset_demo()
+        Console(markup=False).print("Demo data reset.")
     return 0
 
 
