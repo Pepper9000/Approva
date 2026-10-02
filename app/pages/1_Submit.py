@@ -18,7 +18,7 @@ EXAMPLES = {
 }
 
 st.title("Submit a request")
-st.caption("A request is parsed, checked against policy, and routed by deterministic controls.")
+st.caption("AI interprets the request; deterministic policy and authorization controls determine what can happen.")
 columns = st.columns(4)
 for (scenario, text), column in zip(EXAMPLES.items(), columns):
     with column:

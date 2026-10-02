@@ -40,5 +40,5 @@ def call_tool(name: str, authorization, request_type: str | None = None, **argum
     from approva.gateway import validate_permit
 
     if not validate_permit(authorization, name, arguments):
-        raise PermissionError("Tool dispatch requires a matching ALLOW permit from the Decision Gateway")
+        raise PermissionError("Tool dispatch requires a matching ALLOW permit from the Decision Gateway; permit is invalid or forged")
     return tool.fn(authorization=authorization, **arguments)

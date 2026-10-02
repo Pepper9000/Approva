@@ -1,6 +1,6 @@
-# Approva — The Autonomous Approvals Desk for Enterprises
+# Approva — The Approval and Authorization Firewall
 
-> **One sentence in. Approved, escalated, or executed out. Every decision cited and audited.**
+> **AI proposes. Policy constrains. Humans authorize. Gateway executes. Audit proves.**
 >
 > Build specification v1.1 (adds multi-pipeline resilience, §5A, and the Laya decision layer, §9A). This document is written so that a human team *or* an AI coding agent can build the whole project from it. It is the single source of truth.
 
@@ -28,8 +28,8 @@ You are building **Approva** from scratch in an empty repository. Follow these r
 ## 1. Product definition
 
 **Name:** Approva
-**Category:** Enterprise AI agents / workflow automation / human-AI collaboration
-**One-liner:** A multi-agent system that turns messy, free-text internal requests (software licenses, expense claims) into policy-checked, risk-scored, audited decisions, executing the safe ones autonomously and escalating the rest to humans with a ready-to-decide brief.
+**Category:** Approval and authorization firewall for employee and AI-agent requests
+**One-liner:** Approva sits between employee or AI requests and enterprise actions. It interprets the request, applies deterministic policy and risk controls, verifies authority, and allows, holds, or blocks each action with an auditable evidence record.
 
 ### 1.1 The problem
 Internal approvals are a tax on every employee. A request bounces between the requester, a manager, Finance, Security and Legal; people hunt for the right policy, the right approver, and the right form. Approvers rubber-stamp what they cannot properly review, and compliance teams cannot reconstruct *who approved what, on what basis*.
@@ -44,10 +44,10 @@ Internal approvals are a tax on every employee. A request bounces between the re
 | **Neha** (Legal Counsel) | `legal` approver | Contract/data-protection implications highlighted |
 | **Auditor** (read-only) | Compliance | Tamper-evident, exportable decision history |
 
-### 1.3 Value proposition
-- **Faster:** decision-ready in seconds; routine requests complete with zero human touch.
-- **Safer:** AI can never approve beyond what policy allows; it can only tighten, never loosen.
-- **Auditable:** every decision cites verbatim policy clauses and is logged in a hash-chained trail.
+### 1.3 Product boundary
+- **AI interprets; it does not authorize.** Intake and policy model outputs are proposals validated and constrained by deterministic code.
+- **Policy and authority control the action.** Matrix roles, risk rules, human approvals, and the Decision Gateway determine whether a side effect is allowed.
+- **Evidence accompanies the result.** Validated policy citations, approvals, Gateway outcomes, tool results, and the tamper-evident audit chain are presented in a Decision Passport.
 
 ### 1.4 Non-goals (do NOT build)
 Real OAuth/SSO, real Jira/ERP/HRMS integrations, multi-tenancy, user management/login, email parsing, mobile app, more than two workflows, payments, anything involving "scalability" infrastructure.
@@ -153,13 +153,14 @@ flowchart LR
   P --> M[Approval Matrix<br/>deterministic floor]
   M --> R[Risk Engine<br/>deterministic score]
   R --> D[Decision Engine<br/>deterministic rules]
-  D -->|AUTO_APPROVE| X[Executor<br/>guarded tool calls]
+  D -->|AUTO_APPROVE| X[Executor]
   D -->|REQUIRE_APPROVAL / ESCALATE| B[Brief Agent<br/>LLM]
   B --> H[Human Approval Inbox]
   H -->|all required roles approve| X
   D -->|REJECT / NEEDS_INFO| UI
-  X --> T[(Mock tools: tickets, licenses, ledger, outbox)]
-  X --> S[Slack webhook - optional real]
+  X --> G[Decision Gateway<br/>ALLOW / HOLD / BLOCK]
+  G -->|ALLOW permit| T[(Mock tools: tickets, licenses, ledger, outbox)]
+  T --> S[Optional notification delivery]
   O -. every step .-> A[(Auditor: hash-chained log)]
 ```
 
@@ -212,7 +213,8 @@ Statuses (enum `RequestStatus`): `RECEIVED, NEEDS_INFO, AWAITING_APPROVAL, APPRO
 | Decision Engine | Code | Final decision with precedence rules | No | No |
 | Brief Agent | **LLM** | Per-role escalation brief (advisory) | Yes | No |
 | Approval Service | Code | Record approvals, check role coverage, resume | No | No (triggers executor) |
-| Executor | Code | Build execution plan, guard, call tools idempotently | No | **Yes (only place)** |
+| Executor | Code | Build execution plan and request Gateway permits | No | Dispatches only permitted calls |
+| Decision Gateway | Code | Revalidate request, decision, human authority, actor, tool allowlist, arguments, and idempotency | No | **Single ALLOW/HOLD/BLOCK boundary** |
 | Auditor | Code | Append-only hash-chained event log | No | Writes audit only |
 | Pipeline Router / Circuit Breaker | Code | Choose the starting tier, trip on repeated failures, enforce the latency budget (§5A) | No | No |
 | Laya Decision Layer | **Local ML** | Typed choice / yes-no decisions with calibrated probabilities; Tier-2 classifier and Tier-1 tighten-only cross-check (§9A) | No (runs locally) | No |
@@ -358,7 +360,7 @@ CREATE TABLE IF NOT EXISTS component_health(
 | HTTP | `requests` | Slack webhook only |
 | Tests | `pytest` | |
 | Optional | `rich` for CLI output | |
-| Local decision model | **Laya** (Convai Innovations, open-weight; Hugging Face `convaiinnovations/*`) via `transformers` + `torch` | Optional install (`requirements-laya.txt`). The system must run without it |
+| Local decision model | **Laya** (Convai Innovations, Apache-2.0; Hugging Face `convaiinnovations/*`) via the official `laya` Python package | Optional install (`requirements-laya.txt`). The system must run without it |
 
 `requirements.txt`:
 ```
@@ -372,13 +374,11 @@ pytest>=8.0
 rich>=13.0
 ```
 
-`requirements-laya.txt` (optional, heavy; install only on the machine that runs Laya):
+`requirements-laya.txt` (optional; install only on the machine that runs Laya):
 ```
-torch>=2.2
-transformers>=4.48
-huggingface_hub>=0.24
+laya>=0.3.20
 ```
-Laya checkpoints are ModernBERT-based, so use a recent `transformers`; follow the Laya model card for exact versions and loading code.
+The base installation does not install or import Laya eagerly. The adapter uses the documented `laya.load(checkpoint)` and `agent.predict(state, questions)` API. The English checkpoint is Apache-2.0; the typed-decisions checkpoint is specialized to four synthetic workflows. The model card reports its untuned general Laya checkpoint below the majority-class baseline on that benchmark, so Approva makes no claim about Laya accuracy on Meridian policies or these two workflows.
 
 **Models** (configurable; verify current IDs in Anthropic docs before the event):
 - `APPROVA_MODEL_FAST` default `claude-haiku-4-5-20251001` → Intake
@@ -867,11 +867,11 @@ def submit(request_id, approver_id, role, verdict, comment):
 ## 9A. Laya decision layer (local "System 1" model)
 
 ### 9A.1 What Laya is, and what it is not
-Laya is an open-weight, **non-autoregressive decision model** family from Convai Innovations, published on Hugging Face (verify licence and current checkpoint names on the model cards before the event). It is a bidirectional encoder (ModernBERT-based) with a decision head: instead of generating text, it returns **typed answers with calibrated probabilities in a single forward pass**.
+Laya is an open-weight, **non-autoregressive decision model** family from Convai Innovations. The current official Hugging Face cards list Apache-2.0 and document installation with `pip install laya`. The English checkpoint uses ModernBERT-large; `convaiinnovations/laya-typed-decisions` is a fine-tuned specialist for four synthetic workflows, not an Approva model. It returns typed answers and model-reported confidence values; those values are not assumed calibrated for Approva.
 
 Published checkpoints (verify): `convaiinnovations/laya` (English, ~421M parameters, 512-token input), `convaiinnovations/laya-multilingual` (~322M, 100+ languages, 1,024-token input), `convaiinnovations/laya-typed-decisions` (~421M, 1,024-token input). Keep choice questions under roughly 20 options (Laya's own guidance).
 
-Because it never generates text it cannot hallucinate prose or emit malformed JSON, **but it can still be confidently wrong**. Convai's own framing is that Laya is a fast base to *specialise*, not a zero-shot decision engine: out of the box its accuracy on the project's typed-decision benchmark is only slightly above random, and after fine-tuning it reaches roughly 0.77 on that benchmark. Those are Convai's numbers on Convai's benchmark, **not ours**.
+Because it never generates text it cannot hallucinate prose or emit malformed JSON, **but it can still be confidently wrong**. The official model card reports the general English checkpoint at 0.362 accuracy and a 0.461 majority-class baseline on its typed-decision benchmark; the 0.766 result belongs to its separate fine-tuned specialist. Those are Convai's results on Convai's synthetic benchmark, **not Approva measurements**. Laya therefore remains advisory and disabled by default.
 
 Therefore in Approva Laya is **never an authority**. It has exactly two jobs:
 1. the **classifier of the Tier-2 fallback** (replacing Claude's reading when the API is down), and
@@ -881,19 +881,13 @@ Therefore in Approva Laya is **never an authority**. It has exactly two jobs:
 
 ### 9A.2 Adapter protocol (`laya/client.py`)
 ```python
-class LayaClient(Protocol):
+class LayaClientProtocol(Protocol):
     def ready(self) -> bool: ...
-    def choice(self, text: str, question: str, options: list[str]) -> dict[str, float]:
-        """Return {option: probability}, summing to ~1."""
-    def yes_no(self, text: str, question: str) -> float:
-        """Return P(yes)."""
+  def predict(self, state: dict, questions: dict) -> dict: ...
 ```
-Implementations:
-- **`HFLayaClient`**: loads `LAYA_CHECKPOINT` (hub id or a local fine-tuned path) as a lazy singleton, warms up at app start, pins the model revision, uses a GPU if present else CPU. Maps `choice` / `yes_no` onto the model card's typed-decision interface.
-- **`KeywordClassifier`**: pure Python, no ML. Weighted keyword scoring converted to pseudo-probabilities (software: license, seat, subscription, plan, tool, access; expense: reimburse, claim, receipt, cab, flight, hotel, travel, conference; sensitivity: customer, call recording, PII words, source code, payroll, medical; etc.). **Guaranteed to work offline; used whenever Laya is off, unavailable or fails its promotion check.**
-- **`FakeLayaClient`**: deterministic stub for unit tests.
+The verified official call is `agent = laya.load(checkpoint)` followed by `agent.predict(state, questions)`. A response has an `answers` mapping; choice outputs are read from `answers[name].choice`, and confidence is recorded only when actually present. Approva's adapter loads lazily and catches optional-package/model errors. The local structured fallback uses only fields already produced by Intake; it is not a second raw-text parser or an implemented Tier-2 pipeline.
 
-`get_classifier()` returns `HFLayaClient` if `LAYA_MODE != off` and `ready()` and chaos is not disabling it; otherwise `KeywordClassifier`.
+`LAYA_MODE=off` skips inference, `log_only` records recommendations without applying them, and `gate` can only append data sensitivity/manipulation/approver scrutiny or block auto-approval. Existing roles and policy violations are preserved. Model failure routes through the local conservative fallback; in gate mode that fallback blocks autonomous approval.
 
 ### 9A.3 Typed question set (`data/laya_questions.yaml`)
 | ID | Kind | Question (final wording must follow the model card's input format) | Options → mapping |
@@ -1185,6 +1179,14 @@ Theme (match the pitch template): navy `#1B2A4A`, blue `#1C6EBF`, teal `#22B5CB`
 - Lists requests `AWAITING_APPROVAL` whose `required_roles` include the acting user's role. For role `manager`, only those where the requester's `manager_id == acting_as.id`.
 - **Approval card:** headline, requester, amount, vendor status, risk gauge + factors, policy citations, brief (if any) with the acting role's `focus_by_role` check highlighted, per-role approval progress (✓ Manager · ⏳ Finance · ⏳ Security · ⏳ Legal).
 - **Approve** / **Reject** buttons with a comment box. After the final approval the page renders the Executor's trace live (generator).
+
+### 14.5 Approval Attack Lab (`pages/3_Attack_Lab.py`)
+- Runs a fixed eight-case adversarial suite through the actual request orchestrator. The deterministic risk, decision, Gateway, and audit paths are not replaced with display labels.
+- Reports counts from the current run only: tests executed, unsafe auto-approvals, escalations, blocks, holds, and executions. Any unsafe auto-approval is shown as a control failure.
+
+### 14.6 Decision Passport (`pages/4_Decision_Passport.py`)
+- Read-only evidence view for request identity, final deterministic decision, risk, validated citations, structured AI interpretation, Laya status, human approvals, Gateway outcomes, mock artifacts, idempotency keys, and audit integrity.
+- Citations are revalidated before display. AI interpretation is labeled advisory; Laya is labeled non-authoritative and tighten-only.
 
 ### 14.3 Page 3 — Audit (`pages/3_Audit.py`)
 - Filter by request; chronological table (seq, ts, agent, step, status, summary); expandable row detail.

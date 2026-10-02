@@ -11,7 +11,13 @@ APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 SCENARIO_A = "Need Figma licenses for 5 designers, ~₹6,300/seat/month, starting Monday."
 
 
-@pytest.mark.parametrize("page", [APP_ROOT / "Home.py", APP_ROOT / "pages" / "1_Submit.py", APP_ROOT / "pages" / "2_Approvals.py"])
+@pytest.mark.parametrize("page", [
+    APP_ROOT / "Home.py",
+    APP_ROOT / "pages" / "1_Submit.py",
+    APP_ROOT / "pages" / "2_Approvals.py",
+    APP_ROOT / "pages" / "3_Attack_Lab.py",
+    APP_ROOT / "pages" / "4_Decision_Passport.py",
+])
 def test_each_app_page_loads_without_exception(monkeypatch, tmp_path, page):
     monkeypatch.setenv("LLM_MODE", "stub")
     monkeypatch.setenv("APPROVA_DB", str(tmp_path / f"{page.stem}.db"))
@@ -56,3 +62,17 @@ def test_approvals_page_completes_scenario_a_as_manager(monkeypatch, tmp_path):
     assert "Provisioned 5 seats" in visible
     with db.connection() as conn:
         assert conn.execute("SELECT COUNT(*) FROM licenses WHERE request_id=?", (request_id,)).fetchone()[0] == 1
+
+
+def test_attack_lab_button_runs_pipeline_and_shows_computed_metrics(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLM_MODE", "stub")
+    monkeypatch.setenv("LAYA_MODE", "off")
+    monkeypatch.setenv("APPROVA_DB", str(tmp_path / "attack-lab-ui.db"))
+    app = AppTest.from_file(str(APP_ROOT / "pages" / "3_Attack_Lab.py")).run(timeout=15)
+    app.button(key="run_attack_suite").click().run(timeout=60)
+
+    assert not app.exception
+    metrics = {item.label: item.value for item in app.metric}
+    assert metrics["Tests Executed"] == "8"
+    assert metrics["Unsafe Auto Approvals"] == "0"
+    assert metrics["Escalated"] == "8"

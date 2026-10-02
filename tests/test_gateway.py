@@ -6,7 +6,8 @@ import pytest
 from approva import db
 from approva.approvals import submit
 from approva.gateway import (
-    EXECUTOR_ACTOR, AuthorizationState, authorize_action, authorize_request,
+    EXECUTOR_ACTOR, AuthorizationResult, AuthorizationState, authorize_action,
+    authorize_request,
 )
 from approva.orchestrator import create_request, process_request
 from approva.tools.registry import call_tool
@@ -90,6 +91,14 @@ def test_gateway_allows_only_matching_executor_permit_and_binds_arguments(monkey
             request_id=request_id, queue="IT", title="Direct call", body="Must not dispatch",
             authorization=None,
         )
+    forged = AuthorizationResult(
+        state=AuthorizationState.ALLOW, request_id=request_id,
+        actor_id=EXECUTOR_ACTOR["id"], tool_name="create_ticket",
+        arguments_json=permit.arguments_json, idempotency_key=permit.idempotency_key,
+        reason="forged",
+    )
+    with pytest.raises(PermissionError, match="invalid or forged"):
+        call_tool("create_ticket", authorization=forged, request_type="software_license", **args)
     changed = {**args, "queue": "Manual Review"}
     with pytest.raises(PermissionError, match="matching ALLOW permit"):
         call_tool("create_ticket", authorization=permit, request_type="software_license", **changed)

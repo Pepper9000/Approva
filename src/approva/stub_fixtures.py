@@ -64,6 +64,36 @@ def _parsed(scenario: str) -> ParsedRequest:
     return ParsedRequest.model_validate(fixtures[scenario])
 
 
+def _stub_manipulation_signals(user: str) -> list[str]:
+    """Return only explicit manipulation signals present in the stub-mode input."""
+    text = user.casefold()
+    signals = []
+    if any(term in text for term in ("cfo said", "cfo approved", "ceo said", "director said", "boss said")):
+        signals.append("executive_name_drop")
+    if "urgent" in text or "asap" in text or "before security" in text:
+        signals.append("urgency_pressure")
+    if any(term in text for term in ("skip the receipt", "skip receipt", "skip verification", "bypass approval")):
+        signals.append("skip_verification")
+    if any(term in text for term in ("split this purchase", "split the purchase", "do not mention", "don't tell finance", "finance doesn't need to know")):
+        signals.append("policy_override_attempt")
+    if any(term in text for term in ("no receipt actually exists", "receipt is not attached", "receipt does not exist")):
+        signals.append("instruction_injection")
+    return signals
+
+
+def _apply_stub_request_facts(parsed: ParsedRequest, user: str) -> ParsedRequest:
+    """Apply explicit adversarial facts to a canned structured request in stub mode."""
+    signals = list(parsed.manipulation_signals)
+    signals.extend(_stub_manipulation_signals(user))
+    updates = {"manipulation_signals": list(dict.fromkeys(signals))}
+    text = user.casefold()
+    if any(term in text for term in ("no receipt actually exists", "receipt is not attached", "receipt does not exist")):
+        updates["receipt_attached"] = False
+    if "urgent" in text or "asap" in text:
+        updates["urgency"] = "high"
+    return parsed.model_copy(update=updates)
+
+
 def _policy_scenario(user: str) -> tuple[str, dict]:
     """Extract the structured request and scenario key from a policy prompt."""
     try:
@@ -119,7 +149,7 @@ def _policy(scenario: str) -> PolicyVerdict:
 def get_stub_response(schema: type[BaseModel], user: str) -> BaseModel:
     """Return the schema-matched canned response or fail for unknown inputs."""
     if schema is ParsedRequest:
-        return _parsed(_scenario_from_intake(user))
+        return _apply_stub_request_facts(_parsed(_scenario_from_intake(user)), user)
     if schema is PolicyVerdict:
         scenario, _ = _policy_scenario(user)
         return _policy(scenario)

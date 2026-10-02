@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -12,6 +12,7 @@ from approva import audit, db
 from approva.schemas import Decision, DecisionType, RequestStatus, Role, TraceEvent
 
 EXECUTOR_ACTOR = {"id": "approva-executor", "role": "executor"}
+_PERMIT_PROOF = object()
 
 
 class AuthorizationState(str, Enum):
@@ -34,6 +35,7 @@ class AuthorizationResult:
     idempotency_key: str
     reason: str
     ref_id: str | None = None
+    _proof: object = field(repr=False, compare=False, default=None)
 
 
 def _canonical(arguments: dict) -> str:
@@ -82,7 +84,7 @@ def _result(
     return AuthorizationResult(
         state=state, request_id=request_id, actor_id=actor_id, tool_name=tool_name,
         arguments_json=arguments_json, idempotency_key=idempotency_key, reason=reason,
-        ref_id=ref_id,
+        ref_id=ref_id, _proof=_PERMIT_PROOF,
     )
 
 
@@ -210,6 +212,7 @@ def validate_permit(permit: AuthorizationResult, tool_name: str, arguments: dict
     """Check that a permit exactly matches the tool invocation being dispatched."""
     return bool(
         isinstance(permit, AuthorizationResult)
+        and permit._proof is _PERMIT_PROOF
         and permit.state == AuthorizationState.ALLOW
         and permit.actor_id == EXECUTOR_ACTOR["id"]
         and permit.tool_name == tool_name
