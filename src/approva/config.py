@@ -37,3 +37,8 @@ def today() -> date:
 def llm_mode() -> str:
     """Return the configured LLM mode."""
     return setting("LLM_MODE", "live").strip().lower()
+
+
+def laya_mode() -> str:
+    """Return the configured Laya operating mode."""
+    return setting("LAYA_MODE", "off").strip().lower()

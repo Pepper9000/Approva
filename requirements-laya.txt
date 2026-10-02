@@ -1,0 +1,3 @@
+# Optional local integration, verified against the Convai Laya model card.
+# Install only when enabling LAYA_MODE=log_only or LAYA_MODE=gate.
+laya>=0.3.20

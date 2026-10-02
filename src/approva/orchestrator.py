@@ -8,15 +8,17 @@ from datetime import datetime, timezone
 from typing import Callable, Iterator
 
 from approva import audit, db
+from approva import config
 from approva.agents.intake import parse_request
 from approva.agents.policy import evaluate_policy
 from approva.agents.summary import approver_summary
 from approva.engine.costs import annualized_cost
 from approva.engine.decision import decide
-from approva.engine.matrix import matrix_roles_with_clauses
+from approva.engine.matrix import matrix_roles_with_clauses, ordered_union
 from approva.engine.risk import score_risk
 from approva.executor import create_manual_review_ticket, run as execute
-from approva.schemas import Decision, DecisionType, RequestStatus, TraceEvent
+from approva.laya.crosscheck import crosscheck
+from approva.schemas import Decision, DecisionType, RequestStatus, Role, TraceEvent
 
 PLAN = ["intake", "policy", "matrix", "risk", "decision", "summary", "await_approval_or_execute"]
 
@@ -95,6 +97,28 @@ def _employee_context(requester_id: str) -> tuple[str, str]:
     return (row["name"], row["department"]) if row else (requester_id, "")
 
 
+def _run_laya(request: dict, parsed, annual_cost: float | None) -> Iterator[TraceEvent]:
+    """Run, persist, and audit the optional non-authoritative Laya check."""
+    mode = config.laya_mode()
+    if mode == "off":
+        result = {
+            "mode": "off", "status": "SKIPPED", "source": "none", "answers": {},
+            "recommendations": [], "applied": [], "added_roles": [], "block_auto": False,
+        }
+        _save_json(request["id"], "laya_json", result)
+        yield _emit(request, "laya", "laya.skipped", "warn", "Laya is disabled", result)
+        return parsed, result
+    yield _emit(request, "laya", "laya.started", "started", f"Laya second opinion started ({mode})")
+    updated, result = crosscheck(parsed, annual_cost, mode=mode)
+    _save_json(request["id"], "laya_json", result)
+    if result["status"] == "UNAVAILABLE":
+        yield _emit(request, "laya", "laya.unavailable", "warn", "Laya unavailable; local structured fallback used", result)
+    elif result["status"] == "TIGHTENED":
+        yield _emit(request, "laya", "laya.tightened", "warn", "Laya gate added scrutiny", result)
+    yield _emit(request, "laya", "laya.result", "ok", f"Laya status: {result['status']}", result)
+    return updated, result
+
+
 def _set_status(request: dict, status: RequestStatus) -> None:
     """Persist a request state transition and refresh its timestamp."""
     db.save_request(request["id"], status=status.value, updated_at=_now())
@@ -143,6 +167,8 @@ def process_request(request_id: str) -> Iterator[TraceEvent]:
             lambda: parse_request(request["raw_text"], requester_name, department), "parsed_json",
         )
         cost = annualized_cost(parsed)
+        parsed, laya_result = yield from _run_laya(request, parsed, cost)
+        _save_json(request_id, "parsed_json", parsed)
         vendor = parsed.vendor_or_payee
         if parsed.request_type.value == "expense_claim" and vendor is None:
             vendor_status = "approved"
@@ -155,6 +181,13 @@ def process_request(request_id: str) -> Iterator[TraceEvent]:
             request, "policy", "policy",
             lambda: evaluate_policy(parsed, cost, vendor_status), "policy_json",
         )
+        if laya_result.get("added_roles"):
+            policy = policy.model_copy(update={
+                "required_roles": ordered_union(
+                    policy.required_roles, [Role(role) for role in laya_result["added_roles"]]
+                ),
+            })
+            _save_json(request_id, "policy_json", policy)
         for warning in policy_meta.get("warnings", []):
             yield _emit(request, "policy", "validation", "warn", warning)
         roles, clauses = matrix_roles_with_clauses(parsed, cost, vendor_status)
@@ -168,7 +201,10 @@ def process_request(request_id: str) -> Iterator[TraceEvent]:
         )
         decision, _ = yield from _run_step(
             request, "decision", "decision",
-            lambda: (decide(parsed, policy, risk, cost, vendor_status), {}), "decision_json",
+            lambda: (decide(
+                parsed, policy, risk, cost, vendor_status,
+                ctx={"tier": 1, "degraded": False, "laya_block_auto": laya_result.get("block_auto", False)},
+            ), {}), "decision_json",
         )
         summary = approver_summary(parsed, policy, risk, decision, cost, vendor_status)
         _save_json(request_id, "brief_json", summary)

@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS requests(
   id TEXT PRIMARY KEY, requester_id TEXT, raw_text TEXT, status TEXT,
   created_at TEXT, updated_at TEXT, plan_json TEXT, parsed_json TEXT,
   policy_json TEXT, risk_json TEXT, decision_json TEXT, brief_json TEXT,
-  annual_cost REAL, vendor_status TEXT, pipeline_tier TEXT,
+  laya_json TEXT, annual_cost REAL, vendor_status TEXT, pipeline_tier TEXT,
   degraded INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS approvals(
   id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT, role TEXT,
@@ -84,6 +84,10 @@ def init_db(path: str | Path | None = None) -> None:
     """Create all application tables if they do not exist."""
     with connection(path) as conn:
         conn.executescript(DDL)
+    with connection(path) as migration_conn:
+      columns = {row[1] for row in migration_conn.execute("PRAGMA table_info(requests)")}
+      if "laya_json" not in columns:
+        migration_conn.execute("ALTER TABLE requests ADD COLUMN laya_json TEXT")
 
 
 def seed_from_yaml(path: str | Path | None = None, db_path: str | Path | None = None) -> None:

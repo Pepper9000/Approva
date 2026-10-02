@@ -16,16 +16,23 @@ def _context_value(ctx: Any, key: str, default: Any = None) -> Any:
 
 
 def apply_autonomy_caps(decision: Decision, ctx: Any = None) -> Decision:
-    """Cap auto-approval to manager review for degraded or Tier-2 contexts."""
+    """Cap auto-approval to manager review for degraded or disputed contexts."""
     tier = _context_value(ctx, "tier", 1)
     if decision.type != DecisionType.AUTO_APPROVE or not (
-        _context_value(ctx, "degraded", False) or tier >= 2
+        _context_value(ctx, "degraded", False)
+        or tier >= 2
+        or _context_value(ctx, "laya_block_auto", False)
     ):
         return decision
+    reason = (
+        "Laya gate: interpretation disagreement; autonomy blocked"
+        if _context_value(ctx, "laya_block_auto", False)
+        else "Degraded mode: autonomy capped (Tier 2)"
+    )
     return decision.model_copy(update={
         "type": DecisionType.REQUIRE_APPROVAL,
         "required_roles": [Role.MANAGER],
-        "rationale": [*decision.rationale, "Degraded mode: autonomy capped (Tier 2)"],
+        "rationale": [*decision.rationale, reason],
     })
 
 
