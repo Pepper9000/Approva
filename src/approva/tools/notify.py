@@ -5,10 +5,18 @@ from datetime import datetime, timezone
 import requests
 
 from approva import config, db
+from approva.gateway import AuthorizationResult, require_permit
 
 
-def notify(request_id: str, channel: str, recipient: str, subject: str, body: str) -> dict:
+def notify(
+    request_id: str, channel: str, recipient: str, subject: str, body: str,
+    authorization: AuthorizationResult,
+) -> dict:
     """Write every notification to the outbox and optionally deliver to Slack."""
+    require_permit(authorization, "notify", {
+        "request_id": request_id, "channel": channel, "recipient": recipient,
+        "subject": subject, "body": body,
+    })
     delivered = 0
     warning = None
     webhook = config.setting("SLACK_WEBHOOK_URL").strip()

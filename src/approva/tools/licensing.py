@@ -1,6 +1,7 @@
 """Mock software-license provisioning tool."""
 
 from approva import db
+from approva.gateway import AuthorizationResult, require_permit
 
 
 def provision_license(
@@ -10,8 +11,13 @@ def provision_license(
     seats: int,
     requester_id: str,
     start_date: str | None,
+    authorization: AuthorizationResult,
 ) -> dict:
     """Create a license row and return its reference ID."""
+    require_permit(authorization, "provision_license", {
+        "request_id": request_id, "vendor": vendor, "item": item, "seats": seats,
+        "requester_id": requester_id, "start_date": start_date,
+    })
     license_id = db.next_id("LIC")
     with db.connection() as conn:
         conn.execute(

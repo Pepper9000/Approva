@@ -3,10 +3,16 @@
 from datetime import datetime, timezone
 
 from approva import db
+from approva.gateway import AuthorizationResult, require_permit
 
 
-def create_ticket(request_id: str, queue: str, title: str, body: str) -> dict:
+def create_ticket(
+    request_id: str, queue: str, title: str, body: str, authorization: AuthorizationResult,
+) -> dict:
     """Create a ticket row and return its reference ID."""
+    require_permit(authorization, "create_ticket", {
+        "request_id": request_id, "queue": queue, "title": title, "body": body,
+    })
     ticket_id = db.next_id("TKT")
     with db.connection() as conn:
         conn.execute(

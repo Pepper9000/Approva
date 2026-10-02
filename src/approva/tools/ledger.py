@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from approva import db
+from approva.gateway import AuthorizationResult, require_permit
 
 
 def post_ledger_entry(
@@ -11,8 +12,13 @@ def post_ledger_entry(
     amount_inr: float,
     category: str,
     requester_id: str,
+    authorization: AuthorizationResult,
 ) -> dict:
     """Post an approved expense claim to the mock ledger."""
+    require_permit(authorization, "post_ledger_entry", {
+        "request_id": request_id, "payee": payee, "amount_inr": amount_inr,
+        "category": category, "requester_id": requester_id,
+    })
     ledger_id = db.next_id("LED")
     with db.connection() as conn:
         conn.execute(
@@ -29,8 +35,13 @@ def schedule_reimbursement(
     amount_inr: float,
     category: str,
     requester_id: str,
+    authorization: AuthorizationResult,
 ) -> dict:
     """Record a mock reimbursement schedule in the ledger."""
+    require_permit(authorization, "schedule_reimbursement", {
+        "request_id": request_id, "payee": payee, "amount_inr": amount_inr,
+        "category": category, "requester_id": requester_id,
+    })
     schedule_id = db.next_id("LED")
     with db.connection() as conn:
         conn.execute(

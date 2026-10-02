@@ -30,11 +30,15 @@ REGISTRY = {
 }
 
 
-def call_tool(name: str, request_type: str | None = None, **arguments) -> dict:
-    """Invoke an allowlisted tool only for a permitted request type."""
+def call_tool(name: str, authorization, request_type: str | None = None, **arguments) -> dict:
+    """Dispatch a tool only with a gateway permit bound to this exact invocation."""
     tool = REGISTRY.get(name)
     if tool is None:
         raise ValueError(f"Tool is not registered: {name}")
     if request_type is not None and request_type not in tool.allowed_in:
         raise PermissionError(f"Tool {name} is not allowed for {request_type}")
-    return tool.fn(**arguments)
+    from approva.gateway import validate_permit
+
+    if not validate_permit(authorization, name, arguments):
+        raise PermissionError("Tool dispatch requires a matching ALLOW permit from the Decision Gateway")
+    return tool.fn(authorization=authorization, **arguments)

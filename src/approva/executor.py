@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Iterator
 
 from approva import audit, db
+from approva.gateway import (
+    EXECUTOR_ACTOR, AuthorizationState, authorize_action, authorize_request,
+)
 from approva.schemas import DecisionType, RequestStatus, TraceEvent
 from approva.tools.registry import call_tool
 
@@ -18,10 +20,18 @@ class PermissionViolation(RuntimeError):
 
 def create_manual_review_ticket(request_id: str, raw_text: str) -> str:
     """Route an unprocessable request to the Manual Review queue."""
-    result = call_tool(
-        "create_ticket", request_id=request_id, queue="Manual Review",
-        title=f"Approva could not process request {request_id}", body=raw_text,
-    )
+    arguments = {
+        "request_id": request_id,
+        "queue": "Manual Review",
+        "title": f"Approva could not process request {request_id}",
+        "body": raw_text,
+    }
+    permit = authorize_action(request_id, {}, [], EXECUTOR_ACTOR, "create_ticket", arguments)
+    if permit.state == AuthorizationState.HOLD:
+        return permit.ref_id or ""
+    if permit.state != AuthorizationState.ALLOW:
+        raise PermissionViolation(permit.reason)
+    result = call_tool("create_ticket", authorization=permit, request_type="unknown", **arguments)
     return result["ref_id"]
 
 
@@ -31,28 +41,6 @@ def _event(request_id: str, step: str, status: str, summary: str, detail=None) -
         request_id=request_id, ts=datetime.now(timezone.utc), agent="executor",
         step=step, status=status, summary=summary, detail=detail or {},
     ))
-
-
-def _authorized(request: dict, decision: dict, approvals: list[dict]) -> bool:
-    """Check execution status, decision type, required roles, and rejections."""
-    if request["status"] != RequestStatus.APPROVED.value:
-        return False
-    if any(approval["verdict"] == "reject" for approval in approvals):
-        return False
-    roles = set(decision.get("required_roles", []))
-    approved = {approval["role"] for approval in approvals if approval["verdict"] == "approve"}
-    if decision.get("type") == DecisionType.AUTO_APPROVE.value:
-        return not roles
-    if decision.get("type") in (DecisionType.REQUIRE_APPROVAL.value, DecisionType.ESCALATE.value):
-        return roles <= approved
-    return False
-
-
-def _tool_key(request_id: str, name: str, arguments: dict) -> tuple[str, str]:
-    """Return a stable idempotency key and canonical serialized arguments."""
-    serialized = json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-    digest = hashlib.sha256((request_id + name + serialized).encode("utf-8")).hexdigest()
-    return digest, serialized
 
 
 def _employee(employee_id: str) -> dict:
@@ -106,35 +94,45 @@ def run(request_id: str) -> Iterator[TraceEvent]:
         return
     decision = json.loads(request.get("decision_json") or "{}")
     approvals = db.get_approvals(request_id)
-    if not _authorized(request, decision, approvals):
+    request_permit = authorize_request(request_id, decision, approvals, EXECUTOR_ACTOR)
+    if request_permit.state != AuthorizationState.ALLOW:
         failure = _event(
             request_id, "guard", "failed", "PermissionViolation: execution attempted without valid approvals",
-            {"status": request["status"], "decision": decision},
+            {"status": request["status"], "decision": decision, "reason": request_permit.reason},
         )
         yield failure
         raise PermissionViolation(request_id)
 
-    db.save_request(request_id, status=RequestStatus.EXECUTING.value)
-    yield _event(request_id, "guard", "ok", "Execution guard passed")
     parsed = json.loads(request["parsed_json"])
     request_type = parsed["request_type"]
+    execution_started = request["status"] == RequestStatus.EXECUTING.value
     for name, arguments in _tool_plan(request, parsed):
         complete_args = {"request_id": request_id, **arguments}
-        idem_key, args_json = _tool_key(request_id, name, complete_args)
-        with db.connection() as conn:
-            prior = conn.execute("SELECT ok,ref_id,message FROM tool_calls WHERE idem_key=?", (idem_key,)).fetchone()
-        if prior and prior["ok"]:
-            yield _event(request_id, name, "warn", "Tool already completed; skipped duplicate", {"ref_id": prior["ref_id"]})
+        permit = authorize_action(request_id, decision, approvals, EXECUTOR_ACTOR, name, complete_args)
+        if permit.state == AuthorizationState.HOLD:
+            yield _event(request_id, name, "warn", "Tool already completed; skipped duplicate", {"ref_id": permit.ref_id})
             continue
+        if permit.state != AuthorizationState.ALLOW:
+            yield _event(request_id, "guard", "failed", "PermissionViolation: gateway blocked tool action", {
+                "tool": name, "reason": permit.reason,
+            })
+            raise PermissionViolation(permit.reason)
+        if not execution_started:
+            db.save_request(request_id, status=RequestStatus.EXECUTING.value)
+            request["status"] = RequestStatus.EXECUTING.value
+            execution_started = True
+            yield _event(request_id, "guard", "ok", "Execution guard passed")
         yield _event(request_id, name, "started", f"{name} started")
         try:
-            result = call_tool(name, request_type=request_type, **complete_args)
+            result = call_tool(
+                name, authorization=permit, request_type=request_type, **complete_args
+            )
         except Exception as error:
             with db.connection() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO tool_calls(idem_key,request_id,tool,args_json,ok,ref_id,message,ts) "
                     "VALUES(?,?,?,?,?,?,?,?)",
-                    (idem_key, request_id, name, args_json, 0, None, str(error), datetime.now(timezone.utc).isoformat()),
+                    (permit.idempotency_key, request_id, name, permit.arguments_json, 0, None, str(error), datetime.now(timezone.utc).isoformat()),
                 )
             db.save_request(request_id, status=RequestStatus.FAILED.value)
             yield _event(request_id, name, "failed", f"{name} failed: {type(error).__name__}")
@@ -144,7 +142,7 @@ def run(request_id: str) -> Iterator[TraceEvent]:
             conn.execute(
                 "INSERT OR REPLACE INTO tool_calls(idem_key,request_id,tool,args_json,ok,ref_id,message,ts) "
                 "VALUES(?,?,?,?,?,?,?,?)",
-                (idem_key, request_id, name, args_json, 1, result.get("ref_id"), result.get("message", ""), datetime.now(timezone.utc).isoformat()),
+                (permit.idempotency_key, request_id, name, permit.arguments_json, 1, result.get("ref_id"), result.get("message", ""), datetime.now(timezone.utc).isoformat()),
             )
         yield _event(request_id, name, "warn" if warning else "ok", result.get("message", f"{name} completed"), result)
     db.save_request(request_id, status=RequestStatus.COMPLETED.value)
